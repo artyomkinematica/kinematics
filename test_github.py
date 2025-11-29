@@ -29,13 +29,22 @@ alpha = epsilon - delta
 
 gamma = degrees(acos(x_fin / R))
 
-print(f'Импульс основания равен: {500 + (gamma + 7) * 10.5555555}')
+if gamma <= 90:
+    print(f'Импульс основания равен: {560 + (gamma) * 10.7777}')
+elif gamma > 90:
+    print(f'Импульс основания равен: {1530 + 11.22 * (gamma - 90)}')
+
+print(f'Импульс предплечья равен: {326 + 11.09 * (180 - degrees(alpha) - degrees(beta))}')
+
+print('\nИтог\n')
+
+#print(f'Импульс основания равен: {500 + (gamma + 7) * 10.5555555 - 6}')
 print(f'Импульс плеча равен: {500 + ((180 - degrees(alpha) + 5) * 10.5555555)}')
-print(f'Импульс предплечья равен: {500 + ((180 - degrees(beta) - degrees(alpha) + 24) * 10.555555)}')
-print()
-print(f'Угол основания равен: {gamma + 7}')
-print(f'Угол плеча равен: {(180 - degrees(alpha) + 5)}')
-print(f'Угол предплечья равен: {180 - degrees(beta) - degrees(alpha) + 24}')
+#print(f'Импульс предплечья равен: {500 + ((180 - degrees(beta) - degrees(alpha) + 24) * 10.555555)}')
+#print()
+#print(f'Угол основания равен: {gamma + 7}')
+#print(f'Угол плеча равен: {(180 - degrees(alpha) + 5)}')
+#print(f'Угол предплечья равен: {180 - degrees(beta) - degrees(alpha) + 24}')
 #print(x_fin)
 #print(y_fin)
 #print(z_fin)

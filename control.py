@@ -3,7 +3,7 @@ import tkinter as tk
 from tkinter import messagebox
 
 # Настройки подключения
-HOST = "10.65.72.28"  # ← Заменить на IP вашего ESP32
+HOST = "172.20.10.3"  # ← Заменить на IP вашего ESP32
 PORT = 8080
 
 # Домашние позиции (совпадают с теми, что в ESP32)
