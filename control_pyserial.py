@@ -7,8 +7,8 @@ import threading
 # === Настройки ===
 BAUD_RATE = 115200
 STEP_US = 10  # шаг в микросекундах (1 мкс ≈ 0.1° → 1–2 мм)
-STEP_FORWARD = 12  # шаг в микросекундах (1 мкс ≈ 0.1° → 1–2 мм)
-STEP_BACK = 10  # шаг в микросекундах (1 мкс ≈ 0.1° → 1–2 мм)
+STEP_FORWARD = 20  # шаг в микросекундах (1 мкс ≈ 0.1° → 1–2 мм)
+STEP_BACK = 18  # шаг в микросекундах (1 мкс ≈ 0.1° → 1–2 мм)
 
 # Текущие позиции (в микросекундах)
 current_us = {
@@ -23,7 +23,6 @@ MAX_US = 2400
 
 # Глобальный Serial
 ser = None
-
 
 def find_esp32_port():
     """Автоматически ищет порт ESP32"""
@@ -117,13 +116,11 @@ def start_status_reader():
     thread.start()
 
 
-# === GUI ===
 root = tk.Tk()
 root.title("Управление робо-рукой (Serial + Стрелки)")
 root.geometry("500x500")
 root.resizable(False, False)
 
-# Инструкция
 tk.Label(root, text="Управление клавиатурой:", font=("Arial", 12, "bold")).pack(pady=5)
 tk.Label(root, text="← → : поворот основания\n↑ ↓ : плечо\nW/S : локоть\n1/0 : помпа вкл/выкл\nH : домой",
          justify="left", font=("Arial", 10)).pack(pady=5)
