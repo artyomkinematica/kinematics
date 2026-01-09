@@ -27,13 +27,13 @@ cap2 = None
 # === Состояния для Success-режима ===
 success_enter_time = None
 pump_triggered = False
-post_success_sequence_done = True  # изначально разрешено включать авто
+#task_completed = False
+post_success_sequence_done = False
 success_mode_enabled = False
-stop_requested = False  # <-- новый флаг: полная остановка команд
 
 # === ПАРАМЕТРЫ ДЛЯ КАМЕР ===
 # Камера 1 (позиционирование)
-X_TARGET_1 = 140
+X_TARGET_1 = 150
 X_TOL_1 = 8
 Y_TOL_1 = 20
 MIN_AREA_1 = 800
@@ -45,9 +45,9 @@ Y_BOTTOM_1 = 270
 NUM_UP_ACTIONS = 6
 
 # Камера 2 (выравнивание)
-Y_TARGET_2 = 230
+Y_TARGET_2 = 220
 Y_TOL_2 = 50
-X_THRESH_2 = 250
+X_THRESH_2 = 280
 MIN_AREA_2 = 800
 MAX_DIST_2 = 30
 
@@ -59,13 +59,15 @@ def find_esp32_port():
     return None
 
 def connect_serial():
-    global ser, current_us
+    global ser
+    global current_us
     try:
         port = find_esp32_port()
         if not port:
             raise Exception("ESP32 не найден. Подключите устройство по USB.")
         ser = serial.Serial(port, BAUD_RATE, timeout=1)
 
+        # получение значений импульсов серво в течении одной сессии микроконтроллера
         line = ser.readline().decode('utf-8').strip()
         if line.startswith('org:'):
             sae = line[5:].split()
@@ -75,13 +77,13 @@ def connect_serial():
 
         status_label.config(text=f"Подключено к {port}", fg="green")
         print(f"Подключено к {port}")
-        #start_status_reader()
+        start_status_reader()
     except Exception as e:
         status_label.config(text=f"Ошибка: {e}", fg="red")
         print("Serial error:", e)
 
 def send_command(cmd: str):
-    if ser and ser.is_open and not stop_requested:
+    if ser and ser.is_open:
         try:
             ser.write((cmd + "\n").encode('utf-8'))
             print(f"→ {cmd}")
@@ -89,8 +91,8 @@ def send_command(cmd: str):
             status_label.config(text=f"Ошибка отправки: {e}", fg="red")
 
 def on_key(event):
-    if auto_mode_active or stop_requested:
-        return
+    if auto_mode_active:
+        return  # игнорируем клавиши в автоматическом режиме или после завершения
 
     key = event.keysym
     changed = False
@@ -185,12 +187,12 @@ def merge_rectangles(rects, max_distance=20):
 
 # --- Основной цикл: обновление видео + управление ---
 def auto_control_and_display():
-    global auto_mode_active, cap1, cap2, success_enter_time, pump_triggered, post_success_sequence_done, stop_requested
+    global auto_mode_active, cap1, cap2, success_enter_time, pump_triggered
 
     if cap1 is None or not cap1.isOpened():
-        cap1 = cv2.VideoCapture(0)
+        cap1 = cv2.VideoCapture(2)
     if cap2 is None or not cap2.isOpened():
-        cap2 = cv2.VideoCapture(2)
+        cap2 = cv2.VideoCapture(0)
 
     if not cap1.isOpened() or not cap2.isOpened():
         root.after(0, lambda: status_label.config(text="Ошибка: камеры не найдены", fg="red"))
@@ -207,30 +209,6 @@ def auto_control_and_display():
         if not ret1 or not ret2:
             break
 
-        # === Если нажат "Стоп" — только показываем видео, без логики ===
-        if stop_requested:
-            def update_gui_only():
-                if not root.winfo_exists():
-                    return
-                try:
-                    img1 = cv2.cvtColor(frame1, cv2.COLOR_BGR2RGB)
-                    img2 = cv2.cvtColor(frame2, cv2.COLOR_BGR2RGB)
-                    img1 = cv2.resize(img1, (320, 240))
-                    img2 = cv2.resize(img2, (320, 240))
-                    pil1 = Image.fromarray(img1)
-                    pil2 = Image.fromarray(img2)
-                    tk_img1 = ImageTk.PhotoImage(pil1)
-                    tk_img2 = ImageTk.PhotoImage(pil2)
-                    label_cam1.config(image=tk_img1)
-                    label_cam1.image = tk_img1
-                    label_cam2.config(image=tk_img2)
-                    label_cam2.image = tk_img2
-                except Exception as e:
-                    print("Ошибка обновления GUI:", e)
-            root.after(0, update_gui_only)
-            time.sleep(0.03)
-            continue
-
         h1, w1 = frame1.shape[:2]
         h2, w2 = frame2.shape[:2]
 
@@ -238,7 +216,7 @@ def auto_control_and_display():
         Y_TARGET_1_ACTUAL = Y_TOP_1 + (Y_BOTTOM_1 - Y_TOP_1) // 2
         cv2.line(frame1, (X_TARGET_1, Y_TOP_1), (X_TARGET_1, Y_BOTTOM_1), (0, 0, 255), 2)
         cv2.line(frame1, (0, Y_TARGET_1_ACTUAL), (w1, Y_TARGET_1_ACTUAL), (255, 0, 0), 2)
-        cv2.line(frame1, (100, Y_TOP_1), (100, Y_BOTTOM_1), (0, 0, 255), 2)
+        cv2.line(frame1, (80, Y_TOP_1), (80, Y_BOTTOM_1), (0, 0, 255), 2)
         cv2.line(frame1, (0, Y_TOP_1), (X_TARGET_1, Y_TOP_1), (0, 0, 255), 2)
         cv2.line(frame1, (0, Y_BOTTOM_1), (X_TARGET_1, Y_BOTTOM_1), (0, 0, 255), 2)
 
@@ -257,6 +235,7 @@ def auto_control_and_display():
                 center_x = x + 81 + w_obj // 2
                 center_y = y + h_obj // 2
 
+                # === ЦЕНТР ДЕТАЛИ — точка радиусом 5 пикселей ===
                 cv2.circle(frame1, (center_x, center_y), radius=5, color=(0, 255, 255), thickness=-1)
 
                 in_forbidden_zone = (0 <= center_x <= 80) and (Y_TOP_1 <= center_y <= Y_BOTTOM_1)
@@ -269,6 +248,7 @@ def auto_control_and_display():
                     cv2.putText(frame1, "IGNORED", (x + 81, y - 10),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
                 else:
+                    # === Проверка Success-зоны ===
                     in_success_zone = (80 <= center_x <= 150) and (180 <= center_y <= 270)
 
                     if success_mode_enabled and in_success_zone and success_enter_time is None:
@@ -281,6 +261,7 @@ def auto_control_and_display():
                         pump_triggered = False
                         print("✅ Success! Авто режим отключён.")
 
+                    # === Управление и авария — ТОЛЬКО если авто режим активен ===
                     if auto_mode_active:
                         err_x = center_x - X_TARGET_1
                         err_y = center_y - Y_TARGET_1_ACTUAL
@@ -344,137 +325,75 @@ def auto_control_and_display():
 
                         # Аварийный режим
                         if (center_y < Y_TOP_1 or center_y > Y_BOTTOM_1) and (center_x < 200):
-                            if stop_requested:
-                                continue
                             print(f"🚨 Авария: Y={center_y} вне [{Y_TOP_1},{Y_BOTTOM_1}], X={center_x} < 200")
                             cv2.putText(frame1, "EMERGENCY!", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 
                             for i in range(NUM_UP_ACTIONS):
-                                if stop_requested:
-                                    break
                                 current_us["a"] = max(MIN_US, current_us["a"] - STEP_FORWARD)
                                 send_command(f"a{current_us['a']}")
-                                for _ in range(10):
-                                    if stop_requested:
-                                        break
-                                    time.sleep(0.01)
+                                time.sleep(0.1)
 
                             for i in range(6):
-                                if stop_requested:
-                                    break
                                 current_us["e"] = min(MAX_US, current_us["e"] + STEP_FORWARD)
                                 send_command(f"e{current_us['e']}")
-                                for _ in range(10):
-                                    if stop_requested:
-                                        break
-                                    time.sleep(0.01)
+                                time.sleep(0.1)
 
                             root.after(0, update_labels)
-                            for _ in range(30):
-                                if stop_requested:
-                                    break
-                                time.sleep(0.01)
+                            time.sleep(0.3)
 
                     # === Выполнение последовательности после Success ===
                     if success_enter_time is not None and not pump_triggered:
                         if (time.time() - success_enter_time) >= 2.0:
-                            if stop_requested:
-                                continue  # не запускать, если стоп активен
                             print("→ Включаю помпу (p1)")
                             send_command("p1")
                             pump_triggered = True
 
-                            # Выполняем 45 раз: ↑ (плечо вверх) + s (локоть вниз)
+                            # Выполняем 20 раз: ↑ (плечо вверх) + s (локоть вниз)
                             for i in range(45):
-                                if stop_requested:
-                                    print("→ Последовательность прервана (Стоп)")
-                                    break
+                                # ↑ — уменьшаем 'a'
                                 current_us["a"] = max(MIN_US, current_us["a"] - STEP_FORWARD)
                                 send_command(f"a{current_us['a']}")
-                                # Заменяем time.sleep на цикл с проверкой
-                                for _ in range(15):  # ~0.15 сек
-                                    if stop_requested:
-                                        break
-                                    time.sleep(0.01)
+                                time.sleep(0.15)
 
-                                if stop_requested:
-                                    break
-
+                                # s — увеличиваем 'e'
                                 current_us["e"] = min(MAX_US, current_us["e"] + STEP_FORWARD)
                                 send_command(f"e{current_us['e']}")
-                                for _ in range(15):
-                                    if stop_requested:
-                                        break
-                                    time.sleep(0.01)
+                                time.sleep(0.15)
 
                                 root.after(0, update_labels)
-
-                            if stop_requested:
-                                # Прерываем дальнейшие действия
-                                continue
-
-                            # Длительная пауза 10 сек — с возможностью прерывания
-                            for _ in range(1000):  # 10 сек = 1000 * 0.01
-                                if stop_requested:
-                                    print("→ Пауза 10 сек прервана (Стоп)")
-                                    break
-                                time.sleep(0.01)
-
-                            if not stop_requested:
-                                current_us["a"] = 1060
-                                current_us["e"] = 2276
-                                send_command("a1060")
-                                send_command("e2276")
-
-                                time.sleep(0.5)
-                                root.after(0, update_labels)
-
-                                current_us["a"] = 1308
-                                current_us["e"] = 1756
-                                send_command("a1308")
-                                send_command("e1756")
-
-                                time.sleep(0.5)
-                                root.after(0, update_labels)
-
-                                print("→ Устанавливаю stand = 2370")
-                                current_us["s"] = 2370
-                                send_command("s2370")
-                                time.sleep(0.3)
-                                root.after(0, update_labels)
-
-                                print("→ Выключаю помпу (p0)")
-                                send_command("p0")
-
-                                post_success_sequence_done = False
-                                status_label.config(text="Последовательность завершена. Нажмите 'Сброс Success'.",
-                                                    fg="orange")
 
                             time.sleep(10)
 
                             current_us["a"] = 1060
                             current_us["e"] = 2276
+
                             send_command("a1060")
                             send_command("e2276")
-                            time.sleep(0.5)
+
+                            time.sleep(0.5)  # даем время на перемещение
                             root.after(0, update_labels)
 
                             current_us["a"] = 1308
                             current_us["e"] = 1756
+
                             send_command("a1308")
                             send_command("e1756")
-                            time.sleep(0.5)
+
+                            time.sleep(0.5)  # даем время на перемещение
                             root.after(0, update_labels)
 
+                            # === НОВОЕ: установить stand = 2370 ===
                             print("→ Устанавливаю stand = 2370")
                             current_us["s"] = 2370
                             send_command("s2370")
                             time.sleep(0.3)
                             root.after(0, update_labels)
 
+                            # === Выключить помпу ===
                             print("→ Выключаю помпу (p0)")
                             send_command("p0")
 
+                            # Обновить флаги
                             post_success_sequence_done = False
                             status_label.config(text="Последовательность завершена. Нажмите 'Сброс Success'.",
                                                 fg="orange")
@@ -501,6 +420,7 @@ def auto_control_and_display():
                 cv2.putText(frame2, f"Y:{center_y2}", (10, 30),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
 
+                # Управление КАМЕРОЙ 2 — только если авто режим активен
                 if auto_mode_active:
                     err_y2 = center_y2 - Y_TARGET_2
                     if err_y2 > Y_TOL_2:
@@ -537,21 +457,6 @@ def auto_control_and_display():
         root.after(0, update_gui)
         time.sleep(0.03)
 
-def toggle_stop_continue():
-    global stop_requested, auto_mode_active
-    if stop_requested:
-        # Возобновляем управление
-        stop_requested = False
-        control_btn.config(text="Стоп", bg="red")
-        status_label.config(text="Управление возобновлено", fg="green")
-    else:
-        # Останавливаем всё
-        stop_requested = True
-        auto_mode_active = False
-        auto_btn.config(text="Автомат", bg="lightblue")
-        control_btn.config(text="Продолжить", bg="lightgreen")
-        status_label.config(text="Все команды остановлены (Стоп)", fg="orange")
-
 # --- Управление автоматическим режимом ---
 def toggle_auto_mode():
     global auto_mode_active, post_success_sequence_done
@@ -571,33 +476,18 @@ def toggle_auto_mode():
         auto_btn.config(text="Автомат (РАБОТАЕТ)", bg="lightgreen")
         status_label.config(text="Авто режим: активен", fg="blue")
 
-def toggle_success_mode():
-    global success_mode_enabled
-    success_mode_enabled = not success_mode_enabled
-    if success_mode_enabled:
-        success_toggle_btn.config(text="Выключить Success-режим", bg="red")
-        status_label.config(text="Success-режим: ВКЛЮЧЁН", fg="green")
-    else:
-        success_toggle_btn.config(text="Включить Success-режим", bg="lightgreen")
-        status_label.config(text="Success-режим: ВЫКЛЮЧЕН", fg="gray")
-
 def reset_success_state():
-    global success_enter_time, pump_triggered, post_success_sequence_done, success_mode_enabled, stop_requested
+    global success_enter_time, pump_triggered, post_success_sequence_done, success_mode_enabled
     success_enter_time = None
     pump_triggered = False
     post_success_sequence_done = True
-    success_mode_enabled = False
-    stop_requested = False
-    success_toggle_btn.config(text="Включить Success-режим", bg="lightgreen")
+    success_mode_enabled = False  # ← сбросить и Success-режим
     status_label.config(text="Состояние сброшено. Включите Success-режим для новой детали.", fg="green")
     auto_btn.config(state="normal")
-    # Восстанавливаем кнопку в режим "Стоп"
-    control_btn.config(text="Стоп", bg="red")
 
 def on_closing():
-    global cap1, cap2, ser, auto_mode_active, stop_requested
+    global cap1, cap2, ser, auto_mode_active
     auto_mode_active = False
-    stop_requested = True
     time.sleep(0.1)
     if cap1:
         cap1.release()
@@ -631,15 +521,13 @@ connect_btn.pack(pady=5)
 auto_btn = tk.Button(root, text="Автомат", command=toggle_auto_mode, bg="lightblue", font=("Arial", 10, "bold"))
 auto_btn.pack(pady=5)
 
-# После auto_btn и до reset_btn добавьте:
-control_btn = tk.Button(root, text="Стоп", command=toggle_stop_continue, bg="red", font=("Arial", 10, "bold"))
-control_btn.pack(pady=5)
-
 reset_btn = tk.Button(root, text="Сброс Success", command=reset_success_state, bg="lightcoral")
 reset_btn.pack(pady=5)
 
-success_toggle_btn = tk.Button(root, text="Включить Success-режим", command=toggle_success_mode, bg="lightgreen")
-success_toggle_btn.pack(pady=5)
+success_on_btn = tk.Button(root, text="Включить Success-режим", command=lambda: globals().update(success_mode_enabled=True), bg="lightgreen")
+success_off_btn = tk.Button(root, text="Выключить Success-режим", command=lambda: globals().update(success_mode_enabled=False), bg="lightcoral")
+success_on_btn.pack(pady=2)
+success_off_btn.pack(pady=2)
 
 status_label = tk.Label(root, text="Нажмите 'Подключиться'", fg="gray", font=("Arial", 10))
 status_label.pack(pady=5)
@@ -652,6 +540,7 @@ tk.Label(root, text="Камера 2 (Выравнивание по Y=200)", font
 label_cam2 = tk.Label(root)
 label_cam2.pack(pady=2)
 
+# Пустые изображения
 blank = ImageTk.PhotoImage(Image.new('RGB', (320, 240), (0, 0, 0)))
 label_cam1.config(image=blank)
 label_cam1.image = blank
@@ -661,6 +550,7 @@ label_cam2.image = blank
 root.bind("<Key>", on_key)
 update_labels()
 
+# Запуск потока обновления камер
 threading.Thread(target=auto_control_and_display, daemon=True).start()
 
 root.mainloop()
