@@ -12,9 +12,9 @@ STEP_BACK = 18  # шаг в микросекундах (1 мкс ≈ 0.1° → 1
 
 # Текущие позиции (в микросекундах)
 current_us = {
-    "s": 1500,  # Stand
-    "a": 1500,  # Shoulder
-    "e": 1500  # Elbow
+    "s": None,  # Stand
+    "a": None,  # Shoulder
+    "e": None  # Elbow
 }
 
 # Пределы (должны совпадать с ESP32)
@@ -34,11 +34,20 @@ def find_esp32_port():
 
 def connect_serial():
     global ser
+    global current_us
     try:
         port = find_esp32_port()
         if not port:
             raise Exception("ESP32 не найден. Подключите устройство по USB.")
         ser = serial.Serial(port, BAUD_RATE, timeout=1)
+        # получение значений импульсов серво в течении одной сессии микроконтроллера
+        line = ser.readline().decode('utf-8').strip()
+        if line.startswith('org:'):
+            sae = line[5:].split()
+            current_us['s'] = int(sae[0][1:])
+            current_us['a'] = int(sae[1][1:])
+            current_us['e'] = int(sae[2][1:])
+
         status_label.config(text=f"Подключено к {port}", fg="green")
         print(f"Подключено к {port}")
         start_status_reader()

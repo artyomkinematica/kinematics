@@ -18,7 +18,7 @@ z_fin = z_t - BF
 x_fin = x_t - EF
 
 
-R = (x_fin ** 2 + z_fin ** 2) ** 0.5 # угол поворота основания
+R = (x_fin ** 2 + z_fin ** 2) ** 0.5
 L = (x_fin ** 2 + y_fin ** 2 + z_fin ** 2) ** 0.5 # расстояние от начала манипулятора до точки
 beta = acos((A ** 2 + B ** 2 - L ** 2) / (2 * A * B))
 
@@ -27,19 +27,26 @@ delta = acos(R / L)
 
 alpha = epsilon - delta
 
-gamma = degrees(acos(x_fin / R))
+gamma = degrees(acos(x_fin / R)) # угол поворота основания не переведнный в мою систему координат
 
 if gamma <= 90:
-    print(f'Импульс основания равен: {560 + (gamma) * 10.7777}')
+    print(f'Импульс основания равен: {530 + (gamma) * 10.7777}')
+    print(f'Угол основания равен: {gamma}')
+    print('____________________')
 elif gamma > 90:
-    print(f'Импульс основания равен: {1530 + 11.22 * (gamma - 90)}')
+    print(f'Импульс основания равен: {1520 + 11.22 * (gamma - 90)}')
+    print(f'Угол основания равен: {gamma}')
+    print('____________________')
 
-print(f'Импульс предплечья равен: {326 + 11.09 * (180 - degrees(alpha) - degrees(beta))}')
+print(f'Импульс предплечья равен: {500 + ((180 - degrees(alpha) + 5) * 10.5555555)}')
+print(f'Угол преплечья равен: {180 - degrees(alpha) - degrees(beta)}')
+print('____________________')
 
-print('\nИтог\n')
+#print('\nИтог\n')
 
 #print(f'Импульс основания равен: {500 + (gamma + 7) * 10.5555555 - 6}')
-print(f'Импульс плеча равен: {500 + ((180 - degrees(alpha) + 5) * 10.5555555)}')
+print(f'Импульс плеча равен: {326 + 11.09 * (180 - degrees(alpha) - degrees(beta)) + 100}')
+print(f'Угол плеча равен: {180 - degrees(alpha) + 5}')
 #print(f'Импульс предплечья равен: {500 + ((180 - degrees(beta) - degrees(alpha) + 24) * 10.555555)}')
 #print()
 #print(f'Угол основания равен: {gamma + 7}')

@@ -33,19 +33,19 @@ success_mode_enabled = False
 
 # === ПАРАМЕТРЫ ДЛЯ КАМЕР ===
 # Камера 1 (позиционирование)
-X_TARGET_1 = 100
+X_TARGET_1 = 150
 X_TOL_1 = 8
 Y_TOL_1 = 20
 MIN_AREA_1 = 800
 MAX_DIST_1 = 30
 
-Y_TOP_1 = 180
+Y_TOP_1 = 170
 Y_BOTTOM_1 = 270
 
 NUM_UP_ACTIONS = 6
 
 # Камера 2 (выравнивание)
-Y_TARGET_2 = 200
+Y_TARGET_2 = 220
 Y_TOL_2 = 50
 X_THRESH_2 = 280
 MIN_AREA_2 = 800
@@ -60,11 +60,21 @@ def find_esp32_port():
 
 def connect_serial():
     global ser
+    global current_us
     try:
         port = find_esp32_port()
         if not port:
             raise Exception("ESP32 не найден. Подключите устройство по USB.")
         ser = serial.Serial(port, BAUD_RATE, timeout=1)
+
+        # получение значений импульсов серво в течении одной сессии микроконтроллера
+        line = ser.readline().decode('utf-8').strip()
+        if line.startswith('org:'):
+            sae = line[5:].split()
+            current_us['s'] = int(sae[0][1:])
+            current_us['a'] = int(sae[1][1:])
+            current_us['e'] = int(sae[2][1:])
+
         status_label.config(text=f"Подключено к {port}", fg="green")
         print(f"Подключено к {port}")
         start_status_reader()
@@ -180,9 +190,9 @@ def auto_control_and_display():
     global auto_mode_active, cap1, cap2, success_enter_time, pump_triggered
 
     if cap1 is None or not cap1.isOpened():
-        cap1 = cv2.VideoCapture(0)
+        cap1 = cv2.VideoCapture(2)
     if cap2 is None or not cap2.isOpened():
-        cap2 = cv2.VideoCapture(2)
+        cap2 = cv2.VideoCapture(0)
 
     if not cap1.isOpened() or not cap2.isOpened():
         root.after(0, lambda: status_label.config(text="Ошибка: камеры не найдены", fg="red"))
@@ -206,11 +216,11 @@ def auto_control_and_display():
         Y_TARGET_1_ACTUAL = Y_TOP_1 + (Y_BOTTOM_1 - Y_TOP_1) // 2
         cv2.line(frame1, (X_TARGET_1, Y_TOP_1), (X_TARGET_1, Y_BOTTOM_1), (0, 0, 255), 2)
         cv2.line(frame1, (0, Y_TARGET_1_ACTUAL), (w1, Y_TARGET_1_ACTUAL), (255, 0, 0), 2)
-        cv2.line(frame1, (30, Y_TOP_1), (30, Y_BOTTOM_1), (0, 0, 255), 2)
+        cv2.line(frame1, (80, Y_TOP_1), (80, Y_BOTTOM_1), (0, 0, 255), 2)
         cv2.line(frame1, (0, Y_TOP_1), (X_TARGET_1, Y_TOP_1), (0, 0, 255), 2)
         cv2.line(frame1, (0, Y_BOTTOM_1), (X_TARGET_1, Y_BOTTOM_1), (0, 0, 255), 2)
 
-        roi1 = frame1[:, 31:] if 31 < w1 else np.zeros((h1, 1, 3), dtype=np.uint8)
+        roi1 = frame1[:, 81:] if 81 < w1 else np.zeros((h1, 1, 3), dtype=np.uint8)
         if roi1.size > 0:
             gray1 = cv2.cvtColor(roi1, cv2.COLOR_BGR2GRAY)
             _, mask1 = cv2.threshold(gray1, 30, 255, cv2.THRESH_BINARY_INV)
@@ -222,24 +232,24 @@ def auto_control_and_display():
 
             if merged1:
                 x, y, w_obj, h_obj = merged1[0]
-                center_x = x + 31 + w_obj // 2
+                center_x = x + 81 + w_obj // 2
                 center_y = y + h_obj // 2
 
                 # === ЦЕНТР ДЕТАЛИ — точка радиусом 5 пикселей ===
                 cv2.circle(frame1, (center_x, center_y), radius=5, color=(0, 255, 255), thickness=-1)
 
-                in_forbidden_zone = (0 <= center_x <= 30) and (Y_TOP_1 <= center_y <= Y_BOTTOM_1)
+                in_forbidden_zone = (0 <= center_x <= 80) and (Y_TOP_1 <= center_y <= Y_BOTTOM_1)
                 color = (0, 0, 255) if in_forbidden_zone else (0, 255, 0)
-                cv2.rectangle(frame1, (x + 31, y), (x + 31 + w_obj, y + h_obj), color, 2)
+                cv2.rectangle(frame1, (x + 81, y), (x + 81 + w_obj, y + h_obj), color, 2)
                 cv2.putText(frame1, f"X:{center_x} Y:{center_y}", (10, 30),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
 
                 if in_forbidden_zone:
-                    cv2.putText(frame1, "IGNORED", (x + 31, y - 10),
+                    cv2.putText(frame1, "IGNORED", (x + 81, y - 10),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
                 else:
                     # === Проверка Success-зоны ===
-                    in_success_zone = (30 <= center_x <= 100) and (180 <= center_y <= 270)
+                    in_success_zone = (80 <= center_x <= 150) and (180 <= center_y <= 270)
 
                     if success_mode_enabled and in_success_zone and success_enter_time is None:
                         cv2.putText(frame1, "Success", (10, 60),
