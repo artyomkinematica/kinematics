@@ -8,13 +8,14 @@ import threading
 import time
 from PIL import Image, ImageTk
 
-# === Настройки ===
+# параметры для подключения к ESP32 + настройка шагов для автоматического управления по камерам
 BAUD_RATE = 115200
 STEP_FORWARD = 20
 STEP_BACK = 18
 STEP_US = 10
 STEP_S = 20
 
+# словарь для хранения данных о положении сервомоторов в данный момент + минимальное и максимальное значение для серво
 current_us = {"s": None, "a": None, "e": None}
 MIN_US = 500
 MAX_US = 2400
@@ -24,15 +25,14 @@ auto_mode_active = False
 cap1 = None
 cap2 = None
 
-# === Состояния для Success-режима ===
+# переменные флаги
 success_enter_time = None
 pump_triggered = False
-post_success_sequence_done = True  # изначально разрешено включать авто
+post_success_sequence_done = True
 success_mode_enabled = False
-stop_requested = False  # <-- новый флаг: полная остановка команд
+stop_requested = False
 
-# === ПАРАМЕТРЫ ДЛЯ КАМЕР ===
-# Камера 1 (позиционирование)
+# параметры 1-ой камеры (разлиновка для центрирования)
 X_TARGET_1 = 140
 X_TOL_1 = 8
 Y_TOL_1 = 20
@@ -44,14 +44,14 @@ Y_BOTTOM_1 = 270
 
 NUM_UP_ACTIONS = 6
 
-# Камера 2 (выравнивание)
+# параметры для 2-ой камеры (разлиновка для центрирования)
 Y_TARGET_2 = 230
 Y_TOL_2 = 50
 X_THRESH_2 = 250
 MIN_AREA_2 = 800
 MAX_DIST_2 = 30
 
-# --- Вспомогательные функции ---
+# функции для подключения к ESP32
 def find_esp32_port():
     for port in serial.tools.list_ports.comports():
         if "CP210" in port.description or "ESP32" in port.description or "USB" in port.description:
@@ -80,14 +80,15 @@ def connect_serial():
         status_label.config(text=f"Ошибка: {e}", fg="red")
         print("Serial error:", e)
 
+# функция для отправки команд на микроконтроллер
 def send_command(cmd: str):
     if ser and ser.is_open and not stop_requested:
         try:
-            ser.write((cmd + "\n").encode('utf-8'))
+            ser.write((cmd + "\n").encode('utf-8')) # команды подаются в формате a+10 (отправить сигнал на плечевой серво длительностью на 10 мкс больше - т.е. свдинуть серво на ~1.3 градуса)
             print(f"→ {cmd}")
         except Exception as e:
             status_label.config(text=f"Ошибка отправки: {e}", fg="red")
-
+# функция для ручного управления (стрелки + ws + вкл/откл помпу + вовзрат в "домашнее положение")
 def on_key(event):
     if auto_mode_active or stop_requested:
         return
@@ -135,12 +136,12 @@ def on_key(event):
         elif key in ("w", "s"):
             send_command(f"e{current_us['e']}")
         update_labels()
-
+# обновление текста в GUI
 def update_labels():
     stand_label.config(text=f"Stand: {current_us['s']} µs")
     shoulder_label.config(text=f"Shoulder: {current_us['a']} µs")
     elbow_label.config(text=f"Elbow: {current_us['e']} µs")
-
+# чтение позиции сервомоторов
 def status_reader():
     while ser and ser.is_open:
         try:
@@ -153,7 +154,7 @@ def status_reader():
 def start_status_reader():
     thread = threading.Thread(target=status_reader, daemon=True)
     thread.start()
-
+# функция для наложения рамок на объект
 def merge_rectangles(rects, max_distance=20):
     if not rects:
         return []
@@ -183,7 +184,7 @@ def merge_rectangles(rects, max_distance=20):
         merged.append(tuple(merged_current))
     return merged
 
-# --- Основной цикл: обновление видео + управление ---
+# основной цикл: обновление видео и управление(автоматическое/ручное)
 def auto_control_and_display():
     global auto_mode_active, cap1, cap2, success_enter_time, pump_triggered, post_success_sequence_done, stop_requested
 
@@ -207,7 +208,7 @@ def auto_control_and_display():
         if not ret1 or not ret2:
             break
 
-        # === Если нажат "Стоп" — только показываем видео, без логики ===
+        # логика при нажатой кнопке "СТОП"
         if stop_requested:
             def update_gui_only():
                 if not root.winfo_exists():
@@ -234,7 +235,7 @@ def auto_control_and_display():
         h1, w1 = frame1.shape[:2]
         h2, w2 = frame2.shape[:2]
 
-        # === Камера 1: линии и обработка ===
+        # камера 1: наложение линий для центрирования и логика автоматического передвижения 
         Y_TARGET_1_ACTUAL = Y_TOP_1 + (Y_BOTTOM_1 - Y_TOP_1) // 2
         cv2.line(frame1, (X_TARGET_1, Y_TOP_1), (X_TARGET_1, Y_BOTTOM_1), (0, 0, 255), 2)
         cv2.line(frame1, (0, Y_TARGET_1_ACTUAL), (w1, Y_TARGET_1_ACTUAL), (255, 0, 0), 2)
@@ -242,6 +243,7 @@ def auto_control_and_display():
         cv2.line(frame1, (0, Y_TOP_1), (X_TARGET_1, Y_TOP_1), (0, 0, 255), 2)
         cv2.line(frame1, (0, Y_BOTTOM_1), (X_TARGET_1, Y_BOTTOM_1), (0, 0, 255), 2)
 
+        
         roi1 = frame1[:, 81:] if 81 < w1 else np.zeros((h1, 1, 3), dtype=np.uint8)
         if roi1.size > 0:
             gray1 = cv2.cvtColor(roi1, cv2.COLOR_BGR2GRAY)
@@ -259,7 +261,7 @@ def auto_control_and_display():
 
                 cv2.circle(frame1, (center_x, center_y), radius=5, color=(0, 255, 255), thickness=-1)
 
-                in_forbidden_zone = (0 <= center_x <= 80) and (Y_TOP_1 <= center_y <= Y_BOTTOM_1)
+                in_forbidden_zone = (0 <= center_x <= 80) and (Y_TOP_1 <= center_y <= Y_BOTTOM_1) # зона в которой наступает так называемый "успех": деталь чётко под присоской для 1-ой камеры
                 color = (0, 0, 255) if in_forbidden_zone else (0, 255, 0)
                 cv2.rectangle(frame1, (x + 81, y), (x + 81 + w_obj, y + h_obj), color, 2)
                 cv2.putText(frame1, f"X:{center_x} Y:{center_y}", (10, 30),
@@ -279,7 +281,7 @@ def auto_control_and_display():
                         status_label.config(text="Авто режим: отключён (успех)", fg="green")
                         success_enter_time = time.time()
                         pump_triggered = False
-                        print("✅ Success! Авто режим отключён.")
+                        print("Success! Авто режим отключён.") # если деталь в зоне success (успех), то выполняем дальнейший алгоритм
 
                     if auto_mode_active:
                         err_x = center_x - X_TARGET_1
@@ -287,6 +289,7 @@ def auto_control_and_display():
                         in_x_zone = abs(err_x) <= X_TOL_1
                         in_y_zone = abs(err_y) <= Y_TOL_1
 
+                        # логика для центрирования: если деталь выше центральной горизональной линии, то с помощью серво плеча и предплечья стараемся удержать центр детали около этой линии, пока центр не попадёт в success зону
                         if not (in_x_zone and in_y_zone):
                             command_sent = False
                             if err_x > X_TOL_1 and err_y > Y_TOL_1:
@@ -342,11 +345,11 @@ def auto_control_and_display():
                                 time.sleep(MOVE_DELAY)
                                 root.after(0, update_labels)
 
-                        # Аварийный режим
+                        # аварийный режим, если деталь не попала в зону успеха а ниже оказалась или выше нее (на камере находится около левого края), то выполняем поднятие руки над деталью и выполняем предыдущий алгоритм еще раз
                         if (center_y < Y_TOP_1 or center_y > Y_BOTTOM_1) and (center_x < 200):
                             if stop_requested:
                                 continue
-                            print(f"🚨 Авария: Y={center_y} вне [{Y_TOP_1},{Y_BOTTOM_1}], X={center_x} < 200")
+                            print(f"Авария: Y={center_y} вне [{Y_TOP_1},{Y_BOTTOM_1}], X={center_x} < 200")
                             cv2.putText(frame1, "EMERGENCY!", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 
                             for i in range(NUM_UP_ACTIONS):
@@ -375,24 +378,22 @@ def auto_control_and_display():
                                     break
                                 time.sleep(0.01)
 
-                    # === Выполнение последовательности после Success ===
+                    # здесь описываем логику, если деталь попала в зоны успеха на обеих камерах
                     if success_enter_time is not None and not pump_triggered:
                         if (time.time() - success_enter_time) >= 2.0:
                             if stop_requested:
-                                continue  # не запускать, если стоп активен
+                                continue
                             print("→ Включаю помпу (p1)")
                             send_command("p1")
                             pump_triggered = True
 
-                            # Выполняем 45 раз: ↑ (плечо вверх) + s (локоть вниз)
                             for i in range(45):
                                 if stop_requested:
                                     print("→ Последовательность прервана (Стоп)")
                                     break
                                 current_us["a"] = max(MIN_US, current_us["a"] - STEP_FORWARD)
                                 send_command(f"a{current_us['a']}")
-                                # Заменяем time.sleep на цикл с проверкой
-                                for _ in range(15):  # ~0.15 сек
+                                for _ in range(15):
                                     if stop_requested:
                                         break
                                     time.sleep(0.01)
@@ -410,11 +411,9 @@ def auto_control_and_display():
                                 root.after(0, update_labels)
 
                             if stop_requested:
-                                # Прерываем дальнейшие действия
                                 continue
 
-                            # Длительная пауза 10 сек — с возможностью прерывания
-                            for _ in range(1000):  # 10 сек = 1000 * 0.01
+                            for _ in range(1000):
                                 if stop_requested:
                                     print("→ Пауза 10 сек прервана (Стоп)")
                                     break
@@ -479,7 +478,7 @@ def auto_control_and_display():
                             status_label.config(text="Последовательность завершена. Нажмите 'Сброс Success'.",
                                                 fg="orange")
 
-        # === Камера 2: выравнивание по Y ===
+        # логика для центрирования по камере 2 + разлиновка
         cv2.line(frame2, (X_THRESH_2, 0), (X_THRESH_2, h2), (0, 0, 255), 2)
         cv2.line(frame2, (0, Y_TARGET_2), (w2, Y_TARGET_2), (255, 0, 0), 2)
 
@@ -493,6 +492,7 @@ def auto_control_and_display():
             rects2 = [cv2.boundingRect(c) for c in contours2 if cv2.contourArea(c) > MIN_AREA_2]
             merged2 = merge_rectangles(rects2, MAX_DIST_2)
 
+            # наложение квадрата на деталь после ее определения на камере
             if merged2:
                 x, y, w_obj, h_obj = merged2[0]
                 center_y2 = y + h_obj // 2
@@ -514,7 +514,7 @@ def auto_control_and_display():
                         time.sleep(MOVE_DELAY)
                         root.after(0, update_labels)
 
-        # === Обновление изображений ===
+        # функция для обновления изображения в GUI
         def update_gui():
             if not root.winfo_exists():
                 return
@@ -536,11 +536,10 @@ def auto_control_and_display():
 
         root.after(0, update_gui)
         time.sleep(0.03)
-
+# функция для возобновления работоспособности после нажатия кнопки "Стоп"
 def toggle_stop_continue():
     global stop_requested, auto_mode_active
     if stop_requested:
-        # Возобновляем управление
         stop_requested = False
         control_btn.config(text="Стоп", bg="red")
         status_label.config(text="Управление возобновлено", fg="green")
@@ -552,7 +551,7 @@ def toggle_stop_continue():
         control_btn.config(text="Продолжить", bg="lightgreen")
         status_label.config(text="Все команды остановлены (Стоп)", fg="orange")
 
-# --- Управление автоматическим режимом ---
+# функция для управления автоматическим режимом (его включение и выключение)
 def toggle_auto_mode():
     global auto_mode_active, post_success_sequence_done
     if not post_success_sequence_done:
@@ -570,7 +569,7 @@ def toggle_auto_mode():
         auto_mode_active = True
         auto_btn.config(text="Автомат (РАБОТАЕТ)", bg="lightgreen")
         status_label.config(text="Авто режим: активен", fg="blue")
-
+# кнопка включения и выключения зоны успеха
 def toggle_success_mode():
     global success_mode_enabled
     success_mode_enabled = not success_mode_enabled
@@ -591,7 +590,6 @@ def reset_success_state():
     success_toggle_btn.config(text="Включить Success-режим", bg="lightgreen")
     status_label.config(text="Состояние сброшено. Включите Success-режим для новой детали.", fg="green")
     auto_btn.config(state="normal")
-    # Восстанавливаем кнопку в режим "Стоп"
     control_btn.config(text="Стоп", bg="red")
 
 def on_closing():
@@ -607,10 +605,10 @@ def on_closing():
         ser.close()
     root.destroy()
 
-# --- Создание GUI ---
+# далее код создания GUI
 root = tk.Tk()
 root.title("Управление робо-рукой с камерами")
-root.geometry("700x820")
+root.geometry("700x820") # размер окна (опционально, но размер изображения и кнопок не меняется, поэтому при таких параметров экрана видны все элементы)
 root.resizable(False, False)
 root.protocol("WM_DELETE_WINDOW", on_closing)
 
