@@ -39,7 +39,7 @@ emergency_lift_done = False
 success_full_start_time = None
 success_full_confirmed = False
 SUCCESS_HOLD_TIME = 2
-MAX_AREA_EMERGENCY_1 = 20000
+MAX_AREA_EMERGENCY_1 = 15000
 MAX_AREA_EMERGENCY_2 = 50000
 
 # параметры 1-ой камеры (разлиновка для центрирования)
