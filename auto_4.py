@@ -162,7 +162,6 @@ def update_labels():
 
 # функция для объединения
 def merge_rectangles(rects, max_distance=20):
-    """Функция объединения близких прямоугольников"""
     if not rects:
         return []
     merged = []
@@ -193,19 +192,18 @@ def merge_rectangles(rects, max_distance=20):
 
 
 def perform_emergency_lift():
-    """Выполнить аварийное поднятие (как в камере 1)"""
     global stop_requested, emergency_lift_in_progress, emergency_lift_done
 
     if emergency_lift_in_progress:
-        print("⚠️ Аварийное поднятие уже выполняется, пропускаю...")
+        print("Аварийное поднятие")
         return
 
     emergency_lift_in_progress = True
-    emergency_lift_done = True  # Помечаем что поднятие выполнено
+    emergency_lift_done = True
 
-    print("🚨 Выполняю аварийное поднятие (деталь в success_zone1, но не в success_zone2)")
+    print("Аварийное поднятие")
 
-    # Аварийный режим - поднятие
+    # "аварийное поднятие"
     for i in range(NUM_UP_ACTIONS):
         if stop_requested:
             emergency_lift_in_progress = False
@@ -230,21 +228,20 @@ def perform_emergency_lift():
 
     root.after(0, update_labels)
 
-    # Короткая пауза
     for _ in range(30):
         if stop_requested:
             break
         time.sleep(0.01)
 
-    print("✅ Аварийное поднятие завершено")
+    print("Поднятие завершено")
     emergency_lift_in_progress = False
 
 
-# --- Основной цикл: обновление видео + управление ---
+# основной цикл: детекция + автоматическое управление + логика
 def auto_control_and_display():
     global auto_mode_active, cap1, cap2, success_enter_time, pump_triggered, post_success_sequence_done, stop_requested
     global success_zone1_entered, success_zone2_entered, success_partial_time, emergency_lift_done, emergency_lift_in_progress
-    global success_full_start_time, success_full_confirmed  # добавить эту строку
+    global success_full_start_time, success_full_confirmed
 
     if cap1 is None or not cap1.isOpened():
         cap1 = cv2.VideoCapture(1)
@@ -266,7 +263,7 @@ def auto_control_and_display():
         if not ret1 or not ret2:
             break
 
-        # === Если нажат "Стоп" — только показываем видео, без логики ===
+        # если нажата кнопка "СТОП" то просто показываем видео
         if stop_requested:
             def update_gui_only():
                 if not root.winfo_exists():
@@ -294,20 +291,18 @@ def auto_control_and_display():
         h1, w1 = frame1.shape[:2]
         h2, w2 = frame2.shape[:2]
 
-        # Если аварийное поднятие в процессе, сбрасываем все success флаги
+
         if emergency_lift_in_progress:
             success_zone1_entered = False
             success_zone2_entered = False
             success_partial_time = None
 
-        # Сбрасываем флаги для нового кадра (но сохраняем если уже был success)
         if success_enter_time is None and not emergency_lift_done:
-            # Только сбрасываем если не было аварийного поднятия для этой детали
             if not (success_zone1_entered or success_zone2_entered):
                 success_zone1_entered = False
                 success_zone2_entered = False
 
-        # === Камера 1: линии и обработка ===
+        # показ камеры 1, детекция предмета, выполнение алгоритма для камеры 1
         Y_TARGET_1_ACTUAL = Y_TOP_1 + (Y_BOTTOM_1 - Y_TOP_1) // 2
 
         cv2.line(frame1, (X_TARGET_1, Y_TOP_1), (X_TARGET_1, Y_BOTTOM_1), (0, 0, 255), 2)
@@ -334,6 +329,7 @@ def auto_control_and_display():
 
                 cv2.circle(frame1, (center_x, center_y), radius=5, color=(0, 255, 255), thickness=-1)
 
+                # зона в которой должен находится объект (success зона)
                 in_forbidden_zone = (0 <= center_x <= X_TARGET_MIN) and (Y_TOP_1 <= center_y <= Y_BOTTOM_1)
                 color = (0, 0, 255) if in_forbidden_zone else (0, 255, 0)
                 cv2.rectangle(frame1, (x + X_TARGET_MIN, y), (x + X_TARGET_MIN + w_obj, y + h_obj), color, 2)
@@ -343,21 +339,18 @@ def auto_control_and_display():
                 if not in_forbidden_zone:
                     in_success_zone1 = (X_TARGET_MIN <= center_x <= X_TARGET_1) and (180 <= center_y <= 270)
 
-                    # Отмечаем на изображении если в зоне success
                     if in_success_zone1:
                         cv2.putText(frame1, "In Success Zone 1", (10, 90),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
                         success_zone1_entered = True
 
-                        # Если деталь только что попала в зону 1 и поднятие не выполнено, запоминаем время
                         if success_partial_time is None and not emergency_lift_done:
                             success_partial_time = time.time()
                     else:
-                        # Если вышли из зоны success и не в процессе поднятия
                         if success_partial_time is not None and not success_zone2_entered and not emergency_lift_in_progress:
                             success_partial_time = None
-                            emergency_lift_done = False  # Сбрасываем флаг поднятия
-
+                            emergency_lift_done = False
+                    # блок автоматического управления
                     if auto_mode_active and not emergency_lift_in_progress:
                         err_x = center_x - X_TARGET_1
                         err_y = center_y - Y_TARGET_1_ACTUAL
@@ -419,19 +412,18 @@ def auto_control_and_display():
                                 time.sleep(MOVE_DELAY)
                                 root.after(0, update_labels)
 
-                        # Аварийный режим (как в первом коде)
+                        # аварийный режим
                         if (center_y < Y_TOP_1 or center_y > Y_BOTTOM_1) and (center_x < X_TARGET_1):
                             if stop_requested or emergency_lift_in_progress:
                                 continue
-                            print(f"🚨 Авария: Y={center_y} вне [{Y_TOP_1},{Y_BOTTOM_1}], X={center_x} < {X_TARGET_1}")
+                            #print(f"Авария: Y={center_y} вне [{Y_TOP_1},{Y_BOTTOM_1}], X={center_x} < {X_TARGET_1}")
                             cv2.putText(frame1, "EMERGENCY!", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
                             perform_emergency_lift()
 
-        # === Камера 2: выравнивание по Y ===
+        # блок камеры 2: детекция + автоматическое управление + алгоритмы управления
         cv2.line(frame2, (X_THRESH_2, 0), (X_THRESH_2, h2), (0, 0, 255), 2)
         cv2.line(frame2, (0, Y_TARGET_2), (w2, Y_TARGET_2), (255, 0, 0), 2)
 
-        # Рисуем зону Success для камеры 2
         cv2.rectangle(frame2,
                       (X_TARGET_MIN_2, Y_SUCCESS_TOP_2),
                       (X_TARGET_2, Y_SUCCESS_BOTTOM_2),
@@ -455,9 +447,9 @@ def auto_control_and_display():
                     x_full = x + X_THRESH_2 + 1
                     center_x2 = x_full + w_obj // 2
 
-                    cv2.circle(frame2, (center_x2, center_y2), radius=5, color=(0, 255, 255), thickness=-1)
+                    cv2.circle(frame2, (center_x2, center_y2), radius=5, color=(0, 255, 255), thickness=-1) # рисование обводки деталей
 
-                    # Success-зона для второй камеры
+                    # success-зона для второй камеры
                     in_success_zone2 = (
                             X_TARGET_MIN_2 <= center_x2 <= X_TARGET_2 and
                             Y_SUCCESS_TOP_2 <= center_y2 <= Y_SUCCESS_BOTTOM_2
@@ -469,17 +461,15 @@ def auto_control_and_display():
                         cv2.rectangle(frame2, (x_full, y), (x_full + w_obj, y + h_obj), (0, 255, 255), 3)
                         success_zone2_entered = True
                     else:
-                        # Если вышли из зоны 2 и не в процессе поднятия
                         if success_partial_time is not None and not success_zone1_entered and not emergency_lift_in_progress:
                             success_partial_time = None
-                            emergency_lift_done = False  # Сбрасываем флаг поднятия
+                            emergency_lift_done = False
 
-                    # Базовый прямоугольник
                     cv2.rectangle(frame2, (x_full, y), (x_full + w_obj, y + h_obj), (0, 255, 0), 2)
                     cv2.putText(frame2, f"Y:{center_y2} X:{center_x2}", (10, 30),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
 
-                    # Управление выравниванием по Y
+                    # логика автоматического управления
                     if auto_mode_active and not emergency_lift_in_progress:
                         err_y2 = center_y2 - Y_TARGET_2
                         if err_y2 > Y_TOL_2:
@@ -493,64 +483,59 @@ def auto_control_and_display():
                             time.sleep(MOVE_DELAY)
                             root.after(0, update_labels)
 
-        # === ЛОГИКА ОБРАБОТКИ SUCCESS СОСТОЯНИЙ ===
+        # логика для success-зон
         if success_mode_enabled and success_enter_time is None and not emergency_lift_in_progress:
-            # Проверяем условия для partial success (только одна зона)
+            # если деталь в одной из зон но не в обоих
             if success_zone1_entered and not success_zone2_entered and not emergency_lift_done:
-                # Если деталь в зоне 1 больше 1 секунды и нет в зоне 2
-                if success_partial_time is not None and (time.time() - success_partial_time) > 1.0:
-                    print("⚠️ Деталь в success_zone1, но не в success_zone2. Выполняю аварийное поднятие.")
-                    cv2.putText(frame1, "PARTIAL SUCCESS - EMERGENCY LIFT", (10, 120),
+                # если деталь в зоне 1 дольше 2 секунд но не появляется во второй зоне, то выполняется аварийное поднятие
+                if success_partial_time is not None and (time.time() - success_partial_time) > 2.0:
+                    print("Аварийное поднятие.")
+                    cv2.putText(frame1, "EMERGENCY LIFT", (10, 120),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)
-                    # Выполняем аварийное поднятие
                     perform_emergency_lift()
-                    # Сбрасываем состояние
                     success_partial_time = None
 
-            # --- Проверка полного success с таймером удержания ---
+            # если деталь одновременно в двух success-зонах
             if success_zone1_entered and success_zone2_entered:
-                # Если только что вошли в обе зоны – запоминаем время
                 if success_full_start_time is None:
                     success_full_start_time = time.time()
                     success_full_confirmed = False
                 else:
-                    # Уже были в зонах – проверяем длительность удержания
+                    # если деталь уже была в обеих зонах, то проверяем время удержания в них (на случай если рука случаной "откатилась" в процессе опусканния)
                     if (time.time() - success_full_start_time) >= SUCCESS_HOLD_TIME:
                         if not success_full_confirmed:
                             success_full_confirmed = True
-                            print("✅ Success! Деталь продержалась в обеих зонах достаточно долго.")
+                            #print("Success")
                             cv2.putText(frame1, "Success", (10, 60),
                                         cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
                             cv2.putText(frame2, "Success", (10, 60),
                                         cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
 
-                            # Отключаем авторежим и запускаем послеуспешную последовательность
+                            # если все условия выполнены, то выполняем последовательность действий после присасывания к детали
                             auto_mode_active = False
                             auto_btn.config(text="Автомат", bg="lightblue")
-                            status_label.config(text="Авто режим: отключён (успех)", fg="green")
+                            status_label.config(text="Успех", fg="green")
                             success_enter_time = time.time()
                             pump_triggered = False
                             success_partial_time = None
                             emergency_lift_done = False
             else:
-                # Если деталь вышла из зон до подтверждения – сбрасываем таймер
+                # если деталь вышла из зон до подтверждения, то выполняем аварийное поднятие
                 if success_full_start_time is not None and not success_full_confirmed:
                     success_full_start_time = None
-                    # (опционально) print("Таймер полного success сброшен – выход из зон")
 
-        # === Выполнение последовательности после полного Success ===
+        # последовательность после подтверждения нахождения детали в обеих зонах (опциональная часть кода)
         if success_enter_time is not None and not pump_triggered and not emergency_lift_in_progress:
             if (time.time() - success_enter_time) >= 2.0:
                 if stop_requested:
                     continue
-                print("→ Включаю помпу (p1)")
+                print("Включаю помпу")
                 send_command("p1")
                 pump_triggered = True
 
-                # Выполняем 45 раз: ↑ (плечо вверх) + s (локоть вниз)
                 for i in range(45):
                     if stop_requested:
-                        print("→ Последовательность прервана (Стоп)")
+                        print("Последовательность прервана")
                         break
                     current_us["a"] = max(MIN_US, current_us["a"] - STEP_FORWARD)
                     send_command(f"a{current_us['a']}")
@@ -576,12 +561,11 @@ def auto_control_and_display():
 
                 for _ in range(100):
                     if stop_requested:
-                        print("→ Пауза 1 сек прервана (Стоп)")
+                        print("Пауза 1 сек прервана")
                         break
                     time.sleep(0.01)
 
                 if not stop_requested:
-                    # Плавное перемещение плеча к 2010
                     target_a = 2010
                     step = 25
                     while current_us["a"] < target_a and not stop_requested:
@@ -593,7 +577,6 @@ def auto_control_and_display():
                             time.sleep(0.01)
                         root.after(0, update_labels)
 
-                    # Плавное перемещение локтя к 2042
                     target_e = 2042
                     while current_us["e"] < target_e and not stop_requested:
                         current_us["e"] = min(target_e, current_us["e"] + step)
@@ -604,8 +587,7 @@ def auto_control_and_display():
                             time.sleep(0.01)
                         root.after(0, update_labels)
 
-                    # Плавное перемещение основания к 2390
-                    print("→ Устанавливаю stand = 2390")
+                    #print("Устанавливаю stand = 2390")
                     target_s = 2390
                     while current_us["s"] < target_s and not stop_requested:
                         current_us["s"] = min(target_s, current_us["s"] + step)
@@ -617,7 +599,7 @@ def auto_control_and_display():
                         root.after(0, update_labels)
 
                     if not stop_requested:
-                        print("→ Выключаю помпу (p0)")
+                        print("Выключаю помпу")
                         send_command("p0")
 
                         post_success_sequence_done = False
@@ -626,7 +608,7 @@ def auto_control_and_display():
                             fg="orange"
                         )
 
-        # === Обновление изображений ===
+        # обновление изображения
         def update_gui():
             if not root.winfo_exists():
                 return
@@ -651,24 +633,21 @@ def auto_control_and_display():
 
 
 def emergency_pump_off():
-    """Отправляет команду выключения помпы даже если stop_requested=True"""
     if ser and ser.is_open:
         try:
             ser.write(b"p0\n")
-            print("→ Экстренное выключение помпы (p0)")
+            print("Экстренное выключение помпы")
         except Exception as e:
             status_label.config(text=f"Ошибка отправки p0: {e}", fg="red")
 
-
+# кнопка аварийной остановки
 def toggle_stop_continue():
     global stop_requested, auto_mode_active, emergency_lift_in_progress, emergency_lift_done
     if stop_requested:
-        # Возобновляем управление
         stop_requested = False
         control_btn.config(text="Стоп", bg="red")
         status_label.config(text="Управление возобновлено", fg="green")
     else:
-        # Останавливаем всё
         emergency_pump_off()
         stop_requested = True
         auto_mode_active = False
@@ -676,10 +655,10 @@ def toggle_stop_continue():
         emergency_lift_done = False
         auto_btn.config(text="Автомат", bg="lightblue")
         control_btn.config(text="Продолжить", bg="lightgreen")
-        status_label.config(text="Все команды остановлены (Стоп)", fg="orange")
+        status_label.config(text="Команды остановлены", fg="orange")
 
 
-# --- Управление автоматическим режимом ---
+# управление автоматчиеским режимом
 def toggle_auto_mode():
     global auto_mode_active, post_success_sequence_done
     if not post_success_sequence_done:
@@ -692,7 +671,7 @@ def toggle_auto_mode():
         status_label.config(text="Авто режим: остановлен", fg="gray")
     else:
         if ser is None or not ser.is_open:
-            messagebox.showwarning("Ошибка", "Сначала подключитесь к ESP32!")
+            messagebox.showwarning("Ошибка", "Подключитесь к ESP32!")
             return
         auto_mode_active = True
         auto_btn.config(text="Автомат (РАБОТАЕТ)", bg="lightgreen")
@@ -709,7 +688,7 @@ def toggle_success_mode():
         success_toggle_btn.config(text="Включить Success-режим", bg="lightgreen")
         status_label.config(text="Success-режим: ВЫКЛЮЧЕН", fg="gray")
 
-
+# функция перезагрузки success-зоны
 def reset_success_state():
     global success_enter_time, pump_triggered, post_success_sequence_done, success_mode_enabled, stop_requested
     global success_zone1_entered, success_zone2_entered, success_partial_time, emergency_lift_done, emergency_lift_in_progress
@@ -734,7 +713,7 @@ def reset_success_state():
     auto_btn.config(state="normal")
     control_btn.config(text="Стоп", bg="red")
 
-
+# закрытие приложения
 def on_closing():
     global cap1, cap2, ser, auto_mode_active, stop_requested
     auto_mode_active = False
@@ -749,7 +728,7 @@ def on_closing():
     root.destroy()
 
 
-# --- Создание GUI ---
+# параметры для создания GUI
 root = tk.Tk()
 root.title("Управление робо-рукой с камерами")
 root.geometry("700x900")
@@ -785,11 +764,11 @@ success_toggle_btn.pack(pady=5)
 status_label = tk.Label(root, text="Нажмите 'Подключиться'", fg="gray", font=("Arial", 10))
 status_label.pack(pady=5)
 
-tk.Label(root, text="Камера 1 (Позиционирование)", font=("Arial", 10, "bold")).pack(pady=(10, 0))
+tk.Label(root, text="Камера 1", font=("Arial", 10, "bold")).pack(pady=(10, 0))
 label_cam1 = tk.Label(root)
 label_cam1.pack(pady=2)
 
-tk.Label(root, text="Камера 2 (Выравнивание по Y=240)", font=("Arial", 10, "bold")).pack(pady=(10, 0))
+tk.Label(root, text="Камера 2", font=("Arial", 10, "bold")).pack(pady=(10, 0))
 label_cam2 = tk.Label(root)
 label_cam2.pack(pady=2)
 
